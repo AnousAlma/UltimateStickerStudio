@@ -11,7 +11,8 @@ class Config {
     
     private func loadEnvironmentVariables() {
         guard let path = Bundle.main.path(forResource: ".env", ofType: nil) else {
-            print("Warning: .env file not found in bundle")
+            print("ERROR: .env file not found in bundle")
+            print("Make sure to add .env file to your Xcode project target")
             return
         }
         
@@ -30,12 +31,17 @@ class Config {
                     }
                 }
             }
+            print("Successfully loaded .env file with \(envVariables.count) variables")
         } catch {
-            print("Error reading .env file: \(error)")
+            print("ERROR reading .env file: \(error)")
         }
     }
     
     var stabilityAIAPIKey: String {
-        return envVariables["STABILITY_AI_API_KEY"] ?? ""
+        let key = envVariables["STABILITY_AI_API_KEY"] ?? ""
+        if key.isEmpty {
+            print("ERROR: STABILITY_AI_API_KEY not found in .env file")
+        }
+        return key
     }
 }
