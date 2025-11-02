@@ -44,10 +44,7 @@ enum EditMode {
 
 class ImageProcessor {
     
-    private static let apiKey = "YOUR_API_KEY_HERE"
-    if apiKey == "YOUR_API_KEY_HERE" {
-        throw ProcessingError.noAPIKey
-    }
+    private static let apiKey = "sk-Hy2vzz6W6f9mlyluQw5iY5bCfyOnL0xr2xaUl1mTBpmVTi6L"
     
     static func editImage(
         originalImage: UIImage,
@@ -174,7 +171,6 @@ enum ProcessingError: LocalizedError {
     case invalidImageData
     case apiError(String)
     case networkError(String)
-    case noAPIKey
     
     var errorDescription: String? {
         switch self {
@@ -188,8 +184,6 @@ enum ProcessingError: LocalizedError {
             return "Processing Error: \(message)"
         case .networkError(let message):
             return "Network Error: \(message)"
-        case .noAPIKey:
-            return "Please put in your stable diffusion API key in line 47"
         }
     }
 }
