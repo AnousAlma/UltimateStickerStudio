@@ -44,7 +44,30 @@ enum EditMode {
 
 class ImageProcessor {
     
-    private static let apiKey = "sk-Hy2vzz6W6f9mlyluQw5iY5bCfyOnL0xr2xaUl1mTBpmVTi6L"
+    private static var apiKey: String {
+        return Config.shared.stabilityAIAPIKey
+    }
+    
+    private static func compressImageForAPI(_ image: UIImage) -> UIImage {
+        let maxDimension: CGFloat = 1024
+        let maxFileSize = 500_000 // 500KB target
+        
+        // First resize if needed
+        let size = image.size
+        var newSize = size
+        
+        if size.width > maxDimension || size.height > maxDimension {
+            let ratio = min(maxDimension / size.width, maxDimension / size.height)
+            newSize = CGSize(width: size.width * ratio, height: size.height * ratio)
+        }
+        
+        UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
+        image.draw(in: CGRect(origin: .zero, size: newSize))
+        let resizedImage = UIGraphicsGetImageFromCurrentImageContext() ?? image
+        UIGraphicsEndImageContext()
+        
+        return resizedImage
+    }
     
     static func editImage(
         originalImage: UIImage,
@@ -73,7 +96,9 @@ class ImageProcessor {
             body.append("\(prompt)\r\n".data(using: .utf8)!)
         }
         
-        if let imageData = originalImage.pngData() {
+        // Compress image to stay under API limits
+        let compressedImage = compressImageForAPI(originalImage)
+        if let imageData = compressedImage.jpegData(compressionQuality: 0.8) {
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
             body.append("Content-Disposition: form-data; name=\"image\"; filename=\"image.png\"\r\n".data(using: .utf8)!)
             body.append("Content-Type: image/png\r\n\r\n".data(using: .utf8)!)
@@ -81,12 +106,15 @@ class ImageProcessor {
             body.append("\r\n".data(using: .utf8)!)
         }
         
-        if mode != .remove, let maskData = maskImage.pngData() {
+        if mode != .remove {
+            let compressedMask = compressImageForAPI(maskImage)
+            if let maskData = compressedMask.jpegData(compressionQuality: 0.9) {
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
             body.append("Content-Disposition: form-data; name=\"mask\"; filename=\"mask.png\"\r\n".data(using: .utf8)!)
             body.append("Content-Type: image/png\r\n\r\n".data(using: .utf8)!)
             body.append(maskData)
             body.append("\r\n".data(using: .utf8)!)
+            }
         }
         
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
@@ -118,34 +146,49 @@ class ImageProcessor {
             let (data, response) = try await URLSession.shared.data(for: request)
             
             guard let httpResponse = response as? HTTPURLResponse else {
+                print("Error: Invalid HTTP response")
                 throw ProcessingError.invalidResponse
             }
             
             if httpResponse.statusCode == 200 {
-                let decoder = JSONDecoder()
-                let successResponse = try decoder.decode(ProcessingResponse.self, from: data)
+                let responseString = String(data: data, encoding: .utf8) ?? "No response data"
+                print("Raw API response: \(responseString)")
                 
-                guard let imageData = Data(base64Encoded: successResponse.image),
-                      let editedImage = UIImage(data: imageData) else {
-                    throw ProcessingError.invalidImageData
+                let decoder = JSONDecoder()
+                do {
+                    let successResponse = try decoder.decode(ProcessingResponse.self, from: data)
+                    
+                    guard let imageData = Data(base64Encoded: successResponse.image),
+                          let editedImage = UIImage(data: imageData) else {
+                        print("Error: Failed to decode image data")
+                        throw ProcessingError.invalidImageData
+                    }
+                    
+                    return editedImage.laundered()
+                } catch {
+                    print("Error: cannot parse response - \(error)")
+                    throw ProcessingError.apiError("cannot parse response")
                 }
                 
-                return editedImage.laundered()
-                
             } else {
+                print("Error: HTTP \(httpResponse.statusCode)")
                 let decoder = JSONDecoder()
                 if let errorResponse = try? decoder.decode(ProcessingErrorResponse.self, from: data) {
                     let errorMsg = errorResponse.errors.first ?? "Unknown error"
+                    print("Error: \(errorMsg)")
                     throw ProcessingError.apiError(errorMsg)
                 } else {
                     let errorString = String(data: data, encoding: .utf8) ?? "Unknown error"
+                    print("Error: \(errorString)")
                     throw ProcessingError.apiError("HTTP \(httpResponse.statusCode): \(errorString)")
                 }
             }
             
         } catch let error as ProcessingError {
+            print("Error: \(error.localizedDescription)")
             throw error
         } catch {
+            print("Error: \(error.localizedDescription)")
             throw ProcessingError.networkError(error.localizedDescription)
         }
     }

@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var pickedItem: PhotosPickerItem?
     @State private var originalImage: Image?
     @State private var uploadedUIImage: UIImage?
+    @State private var editedUIImage: UIImage?
     @State private var showingStickerAlert: Bool = false
     @State private var stickerAlertMessage: String = ""
     
@@ -20,73 +21,17 @@ struct ContentView: View {
     var body: some View {
         NavigationView {
             Form {
-
                 Section("Create Sticker from Image") {
-                    PhotosPicker(selection: $pickedItem, matching: .images) {
-                        Label("Select Photo", systemImage: "photo.on.rectangle.angled")
-                    }
-                    
-                    if let originalImage {
-                        VStack(spacing: 12) {
-                            Text("Selected Image:")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                            
-                            originalImage
-                                .resizable()
-                                .scaledToFit()
-                                .frame(height: 200)
-                                .cornerRadius(12)
-                                .shadow(radius: 3)
-                        }
-                    }
-                    
-                    if let uploadedUIImage {
-                        VStack(spacing: 16) {
-                            Text("Ready to create sticker!")
-                                .font(.headline)
-                                .foregroundColor(.green)
-                            
-                            HStack(spacing: 20) {
-                                Button("Save as Sticker") {
-                                    saveSticker(uploadedUIImage, prefix: "sticker")
-                                }
-                                .buttonStyle(.borderedProminent)
-                                
-                                Button("Edit Image") {
-                                    showingAIEditor = true
-                                }
-                                .buttonStyle(.bordered)
-                            }
-                        }
-                        .padding()
-                        .background(Color.green.opacity(0.1))
-                        .cornerRadius(12)
-                    }
+                    photoPickerView
+                    imageDisplayView
+                    actionButtonsView
                 }
                 
-
-                Section {
-                    NavigationLink {
-                        StickerListView(sharedContainerURL: sharedContainerURL)
-                    } label: {
-                        Label("View Saved Stickers", systemImage: "folder.fill")
-                    }
-                }
+                navigationSection
             }
             .navigationTitle("Sticker Studio")
-
             .onChange(of: pickedItem) {
-                Task {
-                    if let data = try? await pickedItem?.loadTransferable(type: Data.self) {
-                        if let uiImage = UIImage(data: data) {
-                            await MainActor.run {
-                                self.originalImage = Image(uiImage: uiImage)
-                                self.uploadedUIImage = uiImage.laundered()
-                            }
-                        }
-                    }
-                }
+                handleImageSelection()
             }
             .alert("Sticker Studio", isPresented: $showingStickerAlert) {
                 Button("OK", role: .cancel) { }
@@ -94,32 +39,188 @@ struct ContentView: View {
                 Text(stickerAlertMessage)
             }
             .sheet(isPresented: $showingAIEditor) {
-                if let currentImage = uploadedUIImage {
-                    NavigationView {
-                        ImageEditorView(
-                            originalImage: currentImage,
-                            onEditComplete: { editedImage in
-                                uploadedUIImage = editedImage
-                                showingAIEditor = false
-                            }
-                        )
-                        .toolbar {
-                            ToolbarItem(placement: .navigationBarLeading) {
-                                Button("Cancel") {
-                                    showingAIEditor = false
-                                }
-                            }
-                        }
+                aiEditorSheet
+            }
+        }
+    }
+    
+    private var photoPickerView: some View {
+        PhotosPicker(selection: $pickedItem, matching: .images) {
+            Label("Select Photo", systemImage: "photo.on.rectangle.angled")
+        }
+    }
+    
+    private var imageDisplayView: some View {
+        Group {
+            if let originalImage = originalImage {
+                VStack(spacing: 12) {
+                    Text("Selected Image:")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    
+                    if let editedUIImage = editedUIImage {
+                        comparisonView(originalImage: originalImage, editedImage: editedUIImage)
+                    } else {
+                        singleImageView(originalImage)
                     }
-                } else {
-                    VStack {
-                        Text("No image available for editing")
-                            .foregroundColor(.red)
-                        Button("Close") {
+                }
+            }
+        }
+    }
+    
+    private func comparisonView(originalImage: Image, editedImage: UIImage) -> some View {
+        HStack(spacing: 8) {
+            VStack(spacing: 4) {
+                Text("Original")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                originalImage
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 120)
+                    .cornerRadius(8)
+            }
+            
+            VStack(spacing: 4) {
+                Text("Edited")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Image(uiImage: editedImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 120)
+                    .cornerRadius(8)
+            }
+        }
+        .padding()
+        .background(Color.blue.opacity(0.05))
+        .cornerRadius(12)
+    }
+    
+    private func singleImageView(_ image: Image) -> some View {
+        image
+            .resizable()
+            .scaledToFit()
+            .frame(height: 200)
+            .cornerRadius(12)
+            .shadow(radius: 3)
+    }
+    
+    private var actionButtonsView: some View {
+        Group {
+            if let uploadedUIImage = uploadedUIImage {
+                VStack(spacing: 16) {
+                    Text("Ready to create sticker!")
+                        .font(.headline)
+                        .foregroundColor(.green)
+                    
+                    if let editedUIImage = editedUIImage {
+                        editedImageButtons(originalImage: uploadedUIImage, editedImage: editedUIImage)
+                    } else {
+                        originalImageButtons(uploadedUIImage)
+                    }
+                }
+                .padding()
+                .background(Color.green.opacity(0.1))
+                .cornerRadius(12)
+            }
+        }
+    }
+    
+    private func editedImageButtons(originalImage: UIImage, editedImage: UIImage) -> some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                Button("Save Original") {
+                    saveSticker(originalImage, prefix: "original")
+                }
+                .buttonStyle(.bordered)
+                
+                Button("Save Edited") {
+                    saveSticker(editedImage, prefix: "edited")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            
+            HStack(spacing: 12) {
+                Button("Edit Again") {
+                    showingAIEditor = true
+                }
+                .buttonStyle(.bordered)
+                
+                Button("Reset to Original") {
+                    editedUIImage = nil
+                }
+                .buttonStyle(.bordered)
+                .foregroundColor(.orange)
+            }
+        }
+    }
+    
+    private func originalImageButtons(_ image: UIImage) -> some View {
+        HStack(spacing: 20) {
+            Button("Save as Sticker") {
+                saveSticker(image, prefix: "sticker")
+            }
+            .buttonStyle(.borderedProminent)
+            
+            Button("Edit Image") {
+                showingAIEditor = true
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+    
+    private var navigationSection: some View {
+        Section {
+            NavigationLink {
+                StickerListView(sharedContainerURL: sharedContainerURL)
+            } label: {
+                Label("View Saved Stickers", systemImage: "folder.fill")
+            }
+        }
+    }
+    
+    private var aiEditorSheet: some View {
+        Group {
+            if let currentImage = uploadedUIImage {
+                NavigationView {
+                    ImageEditorView(
+                        originalImage: currentImage,
+                        onEditComplete: { editedImage in
+                            editedUIImage = editedImage
                             showingAIEditor = false
                         }
+                    )
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            Button("Cancel") {
+                                showingAIEditor = false
+                            }
+                        }
                     }
-                    .padding()
+                }
+            } else {
+                VStack {
+                    Text("No image available for editing")
+                        .foregroundColor(.red)
+                    Button("Close") {
+                        showingAIEditor = false
+                    }
+                }
+                .padding()
+            }
+        }
+    }
+    
+    private func handleImageSelection() {
+        Task {
+            if let data = try? await pickedItem?.loadTransferable(type: Data.self) {
+                if let uiImage = UIImage(data: data) {
+                    await MainActor.run {
+                        self.originalImage = Image(uiImage: uiImage)
+                        self.uploadedUIImage = uiImage.laundered()
+                        self.editedUIImage = nil
+                    }
                 }
             }
         }
